@@ -1,15 +1,26 @@
-import { Routes, Route } from 'react-router-dom'
+// src/App.tsx
+import { Routes, Route, Link } from 'react-router-dom'
 import List from './pages/List'
 import AddProduct from './pages/AddProduct'
 import EditProduct from './pages/EditProduct'
-import Header from './components/Header'
 import './App.css'
 
 function Layout({ children }: { children: React.ReactNode }) {
   return (
     <>
-      <Header />
-      <div className="container">{children}</div>
+      <header className="header">
+        <div className="brand">
+          <img src="/ferrisariato.png" alt="Ferrisariato" className="logo" />
+          <h1>Productos Pinturas</h1>
+        </div>
+
+        {/* Solo un botón global de acción */}
+        <div className="actions">
+          <Link to="/add" className="btn btn-primary">+ Agregar</Link>
+        </div>
+      </header>
+
+      <main className="container">{children}</main>
     </>
   )
 }

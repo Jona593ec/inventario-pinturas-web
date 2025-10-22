@@ -1,164 +1,232 @@
-import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { getProducts, deleteProduct } from '../api'
-import type { Product } from '../api'
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { getProducts, deleteProduct } from '../api';
+import type { Product } from '../api';
 
-type StatusTab = 'todos' | 'OK' | 'POR_VENCER' | 'VENCIDO'
+// ==== Utils ====
+const API = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
 
-export default function List() {
-  const [items, setItems] = useState<Product[]>([])
-  const [status, setStatus] = useState<StatusTab>('todos')
-  const [q, setQ] = useState('')
-  const [brand, setBrand] = useState<string>('') // filtro por marca
-  const [loading, setLoading] = useState<boolean>(true)
-  const nav = useNavigate()
-
-  // Mapeo correcto para la API (usa guion)
-  function mapStatus(s: StatusTab) {
-    if (s === 'todos') return undefined
-    if (s === 'POR_VENCER') return 'por-vencer'
-    return s.toLowerCase() // 'ok' | 'vencido'
+function fmtDate(iso?: string) {
+  if (!iso) return '';
+  try {
+    return String(iso).slice(0, 10).split('-').reverse().join('/');
+  } catch {
+    return String(iso);
   }
+}
+
+function fmtMoney(n: number | string) {
+  const num = Number(n ?? 0);
+  return num.toLocaleString('es-EC', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// ==== Page ====
+export default function List() {
+  const nav = useNavigate();
+
+  const [items, setItems] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const [status, setStatus] = useState<'todos' | 'OK' | 'POR_VENCER' | 'VENCIDO'>('todos');
+  const [brand, setBrand] = useState<string>('');
+  const [q, setQ] = useState<string>('');
 
   async function load() {
-    setLoading(true)
-    const apiStatus = mapStatus(status)
-    const { data } = await getProducts(apiStatus)
-    setItems(data)
-    setLoading(false)
+    setLoading(true);
+    const s = status === 'todos' ? undefined : status.toLowerCase();
+    const { data } = await getProducts(s);
+    setItems(data);
+    setLoading(false);
   }
 
-  useEffect(() => { load() }, [status])
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status]);
 
-  // marcas únicas
+  // marcas únicas (alfabético)
   const brands = useMemo(() => {
-    const set = new Set(items.map(i => (i.brand || '').trim()).filter(Boolean))
-    return Array.from(set).sort((a,b)=>a.localeCompare(b))
-  }, [items])
+    const set = new Set<string>();
+    items.forEach((p) => p.brand && set.add(p.brand));
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [items]);
 
-  // búsqueda + filtro marca
+  // contadores por estado
+  const counts = useMemo(() => {
+    let ok = 0, pv = 0, ve = 0;
+    items.forEach((p) => {
+      if (p.status === 'OK') ok++;
+      else if (p.status === 'POR_VENCER') pv++;
+      else if (p.status === 'VENCIDO') ve++;
+    });
+    return { ok, pv, ve, total: items.length };
+  }, [items]);
+
+  // aplicar filtros (marca + búsqueda)
   const filtered = useMemo(() => {
-    const k = q.trim().toLowerCase()
-    return items.filter(p => {
-      const byQuery = !k || [p.code, p.name, p.brand].some(v => (v||'').toLowerCase().includes(k))
-      const byBrand = !brand || (p.brand || '') === brand
-      return byQuery && byBrand
-    })
-  }, [items, q, brand])
+    const k = q.trim().toLowerCase();
+    return items.filter((p) => {
+      if (brand && p.brand !== brand) return false;
+      if (!k) return true;
+      return (
+        (p.code || '').toLowerCase().includes(k) ||
+        (p.name || '').toLowerCase().includes(k) ||
+        (p.brand || '').toLowerCase().includes(k)
+      );
+    });
+  }, [items, brand, q]);
+
+  // enlaces de reportes (API RailWay)
+  const proformaHref = brand
+    ? `${API}/reports/proforma?brand=${encodeURIComponent(brand)}`
+    : undefined; // se habilita solo si hay marca elegida
+  const csvHref = `${API}/reports/csv`;
 
   return (
-    <>
-      <div className="section-title">
-        <h2>Productos Pinturas</h2>
-        <a className="btn btn-primary" href="/add">+ Agregar</a>
+    <div className="container" style={{ maxWidth: 1180, marginInline: 'auto', padding: 12 }}>
+      {/* Encabezado / acción rápida */}
+      <div className="section-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '6px 0 18px' }}>
+        <h2 style={{ margin: 0 }}>Productos Pinturas</h2>
+        <Link to="/add" className="btn btn-primary">+ Agregar</Link>
       </div>
 
-      <div className="filters">
-        <button className={`tab ${status==='todos'?'active':''}`} onClick={()=>setStatus('todos')}>Todos</button>
-        <button className={`tab ${status==='OK'?'active':''}`} onClick={()=>setStatus('OK')}>OK</button>
-        <button className={`tab ${status==='POR_VENCER'?'active':''}`} onClick={()=>setStatus('POR_VENCER')}>Por vencer</button>
-        <button className={`tab ${status==='VENCIDO'?'active':''}`} onClick={()=>setStatus('VENCIDO')}>Vencido</button>
-      </div>
+      {/* Filtros arriba */}
+      <div className="filters" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+        {/* Tabs de estado con contadores */}
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button className={`tab ${status === 'todos' ? 'active' : ''}`} onClick={() => setStatus('todos')}>
+            Todos <span className="badge-count">{counts.total}</span>
+          </button>
+          <button className={`tab ${status === 'OK' ? 'active' : ''}`} onClick={() => setStatus('OK')}>
+            OK <span className="badge-count">{counts.ok}</span>
+          </button>
+          <button className={`tab ${status === 'POR_VENCER' ? 'active' : ''}`} onClick={() => setStatus('POR_VENCER')}>
+            Por vencer <span className="badge-count">{counts.pv}</span>
+          </button>
+          <button className={`tab ${status === 'VENCIDO' ? 'active' : ''}`} onClick={() => setStatus('VENCIDO')}>
+            Vencido <span className="badge-count">{counts.ve}</span>
+          </button>
+        </div>
 
-      <div style={{display:'flex', gap:8, flexWrap:'wrap', margin:'10px 0'}}>
-        <select className="select" value={brand} onChange={e=>setBrand(e.target.value)}>
+        {/* Select marca */}
+        <select
+          className="select"
+          value={brand}
+          onChange={(e) => setBrand(e.target.value)}
+          style={{ minWidth: 180 }}
+        >
           <option value="">Todas las marcas</option>
-          {brands.map(b => <option key={b} value={b}>{b}</option>)}
+          {brands.map((b) => (
+            <option key={b} value={b}>
+              {b}
+            </option>
+          ))}
         </select>
 
+        {/* Búsqueda */}
         <input
           className="input"
-          style={{flex:'1 1 260px'}}
+          style={{ flex: '1 1 260px', minWidth: 220 }}
           placeholder="Buscar (código, nombre, marca)"
           value={q}
-          onChange={(e)=>setQ(e.target.value)}
+          onChange={(e) => setQ(e.target.value)}
         />
 
-        <a
-          className="btn btn-ghost"
-          href={`/reports/proforma${brand ? `?brand=${encodeURIComponent(brand)}` : ''}`}
-          target="_blank"
-          rel="noreferrer"
-        >
-          Proforma (PDF)
-        </a>
+        {/* Reportes */}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <a
+            className={`btn btn-ghost ${!proformaHref ? 'disabled' : ''}`}
+            href={proformaHref || '#'}
+            target="_blank"
+            rel="noreferrer"
+            title={!proformaHref ? 'Elige una marca para habilitar' : 'Abrir proforma en PDF'}
+            onClick={(e) => {
+              if (!proformaHref) e.preventDefault();
+            }}
+          >
+            Proforma (PDF)
+          </a>
 
-        <a className="btn btn-ghost" href="/reports/csv" target="_blank" rel="noreferrer">Descargar CSV</a>
-        <button className="btn btn-ghost" onClick={load}>Actualizar</button>
+          <a className="btn btn-ghost" href={csvHref} target="_blank" rel="noreferrer">
+            Descargar CSV
+          </a>
+
+          <button className="btn btn-ghost" onClick={load}>
+            Actualizar
+          </button>
+        </div>
       </div>
 
-      {/* Desktop: tabla */}
-      <div className="table-wrap">
-        <table>
+      {/* Tabla */}
+      <div className="table-wrap" style={{ overflowX: 'auto' }}>
+        <table className="table">
           <thead>
             <tr>
-              <th>Código</th><th>Nombre</th><th>Marca</th><th>Cat.</th>
-              <th>Present.</th><th>Vence</th><th>Estado</th><th>Cant.</th><th>$</th><th>Acciones</th>
+              <th>Código</th>
+              <th>Nombre</th>
+              <th>Marca</th>
+              <th>Cat.</th>
+              <th>Present.</th>
+              <th>Vence</th>
+              <th>Estado</th>
+              <th>Cant.</th>
+              <th>$</th>
+              <th>Acciones</th>
             </tr>
           </thead>
+
           <tbody>
             {loading && (
-              <tr><td colSpan={10}>Cargando…</td></tr>
-            )}
-            {!loading && filtered.length===0 && (
-              <tr><td colSpan={10}>Sin resultados</td></tr>
-            )}
-            {!loading && filtered.map(p=>(
-              <tr key={p.id}>
-                <td>{p.code}</td>
-                <td>{p.name}</td>
-                <td>{p.brand}</td>
-                <td>{p.category}</td>
-                <td>{p.presentation}</td>
-                <td>{String(p.expiryDate).slice(0,10).split('-').reverse().join('/')}</td>
-                <td>
-                  {p.status==='OK' && <span className="badge badge-ok">OK</span>}
-                  {p.status==='POR_VENCER' && <span className="badge badge-warn">Por vencer</span>}
-                  {p.status==='VENCIDO' && <span className="badge badge-error">Vencido</span>}
-                </td>
-                <td>{p.quantity}</td>
-                <td>{Number(p.unitPrice).toFixed(2)}</td>
-                <td>
-                  <div style={{display:'flex', gap:8, flexWrap:'wrap'}}>
-                    <button className="btn btn-primary" onClick={()=>nav(`/edit/${p.id}`)}>Editar</button>
-                    <button className="btn btn-danger" onClick={async ()=>{ if(confirm('¿Eliminar este producto?')) { await deleteProduct(p.id); load(); } }}>Eliminar</button>
-                  </div>
-                </td>
+              <tr>
+                <td colSpan={10}>Cargando…</td>
               </tr>
-            ))}
+            )}
+
+            {!loading && filtered.length === 0 && (
+              <tr>
+                <td colSpan={10}>Sin resultados</td>
+              </tr>
+            )}
+
+            {!loading &&
+              filtered.map((p) => (
+                <tr key={p.id}>
+                  <td>{p.code}</td>
+                  <td>{p.name}</td>
+                  <td>{p.brand}</td>
+                  <td>{p.category}</td>
+                  <td>{p.presentation}</td>
+                  <td>{fmtDate(p.expiryDate)}</td>
+                  <td>
+                    {p.status === 'OK' && <span className="badge badge-ok">OK</span>}
+                    {p.status === 'POR_VENCER' && <span className="badge badge-warn">Por vencer</span>}
+                    {p.status === 'VENCIDO' && <span className="badge badge-error">Vencido</span>}
+                  </td>
+                  <td>{p.quantity}</td>
+                  <td>{fmtMoney(p.unitPrice)}</td>
+                  <td>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button className="btn btn-primary" onClick={() => nav(`/edit/${p.id}`)}>
+                        Editar
+                      </button>
+                      <button
+                        className="btn btn-danger"
+                        onClick={async () => {
+                          if (confirm('¿Eliminar este producto?')) {
+                            await deleteProduct(p.id);
+                            load();
+                          }
+                        }}
+                      >
+                        Eliminar
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
           </tbody>
         </table>
       </div>
-
-      {/* Móvil: cards */}
-      <div className="cards">
-        {filtered.map(p=>(
-          <div className="card" key={p.id}>
-            <div className="card-header">
-              <div className="card-title">{p.name}</div>
-              <div className="badge">{p.code}</div>
-            </div>
-
-            <div className="card-row"><b>Marca:</b><span>{p.brand}</span></div>
-            <div className="card-row"><b>Vence:</b><span>{String(p.expiryDate).slice(0,10).split('-').reverse().join('/')}</span></div>
-            <div className="card-row"><b>Presentación:</b><span>{p.presentation}</span></div>
-            <div className="card-row"><b>Estado:</b>
-              <span>
-                {p.status==='OK' && <span className="badge badge-ok">OK</span>}
-                {p.status==='POR_VENCER' && <span className="badge badge-warn">Por vencer</span>}
-                {p.status==='VENCIDO' && <span className="badge badge-error">Vencido</span>}
-              </span>
-            </div>
-            <div className="card-row"><b>Cant:</b><span>{p.quantity}</span></div>
-            <div className="card-row"><b>$</b><span>{Number(p.unitPrice).toFixed(2)}</span></div>
-
-            <div className="card-actions">
-              <button className="btn btn-primary" onClick={()=>nav(`/edit/${p.id}`)}>Editar</button>
-              <button className="btn btn-danger" onClick={async ()=>{ if(confirm('¿Eliminar este producto?')) { await deleteProduct(p.id); load(); } }}>Eliminar</button>
-            </div>
-          </div>
-        ))}
-      </div>
-    </>
-  )
+    </div>
+  );
 }

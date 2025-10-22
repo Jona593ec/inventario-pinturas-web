@@ -1,23 +1,13 @@
-/// <reference types="vite/client" />
-
+// vite.config.ts
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import basicSsl from '@vitejs/plugin-basic-ssl'
 
-const isDev = process.env.NODE_ENV !== 'production'
-
+// Servir por HTTP en LAN (para cámara en móvil)
 export default defineConfig({
-  plugins: isDev ? [react(), basicSsl()] : [react()],
+  plugins: [react()],
   server: {
-    https: true,
-    host: true,
+    https: false,   // 👈 MUY IMPORTANTE: desactivar https
+    host: true,     // escucha en LAN
     port: 5173,
-  },
-  build: {
-    sourcemap: false,
-    outDir: 'dist',
-  },
-  esbuild: {
-    logOverride: { 'this-is-undefined-in-esm': 'silent' },
   },
 })

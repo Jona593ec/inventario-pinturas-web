@@ -1,8 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
-import {
-  BrowserMultiFormatReader,
-  IScannerControls,
-} from '@zxing/browser'
+// src/components/BarcodeScanner.tsx
+import React, { useEffect, useRef, useState } from 'react'
+import { BrowserMultiFormatReader, IScannerControls } from '@zxing/browser'
 
 type Props = {
   onResult: (code: string) => void
@@ -12,59 +10,54 @@ type Props = {
 export default function BarcodeScanner({ onResult, onError }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const controlsRef = useRef<IScannerControls | null>(null)
-  const [running, setRunning] = useState(false)
-  const [msg, setMsg] = useState<string>('')
+  const [msg, setMsg] = useState<string>('Apunta la cámara al código de barras.')
 
   useEffect(() => {
     let cancelled = false
+    const reader = new BrowserMultiFormatReader()
 
-    async function start() {
+    ;(async () => {
       try {
-        setMsg('')
-        // seguridad: usar solo en https o localhost
-        const isSecure = location.protocol === 'https:' || location.hostname === 'localhost'
-        if (!isSecure) {
-          setMsg('Para usar la cámara, abre esta página en HTTPS o localhost.')
-          return
-        }
-
-        const reader = new BrowserMultiFormatReader()
-        const constraints = {
+        // Pedimos directamente la cámara trasera
+        const constraints: MediaStreamConstraints = {
           video: {
             facingMode: { ideal: 'environment' },
             width: { ideal: 1280 },
-            height: { ideal: 720 },
+            height: { ideal: 720 }
           },
-        } as MediaStreamConstraints
+          audio: false,
+        }
 
-        setRunning(true)
-        const controls = await reader.decodeFromConstraints(
+        // ZXing con constraints (mejor que elegir deviceId a mano)
+        controlsRef.current = await reader.decodeFromConstraints(
           constraints,
           videoRef.current!,
           (result, err) => {
             if (cancelled) return
             if (result) {
-              setRunning(false)
-              controlsRef.current?.stop() // detener inmediatamente
-              onResult(result.getText())
+              const text = result.getText()
+              setMsg(`Detectado: ${text}`)
+              onResult(text)
             } else if (err) {
-              // errores de frame sin código: no spamear
+              // NotFoundException = no hay código en el frame, no es error "real"
+              if ((err as any).name !== 'NotFoundException') {
+                setMsg('No se pudo leer. Intenta enfocar mejor…')
+                onError?.(err)
+              }
             }
           }
         )
-        if (!cancelled) controlsRef.current = controls
+        setMsg('Escaneando…')
       } catch (e) {
-        setRunning(false)
+        setMsg('No se pudo abrir la cámara. Revisa permisos.')
         onError?.(e)
       }
-    }
-
-    start()
+    })()
 
     return () => {
       cancelled = true
-      setRunning(false)
-      controlsRef.current?.stop()
+      try { controlsRef.current?.stop() } catch {}
+      try { reader.reset() } catch {}
       controlsRef.current = null
     }
   }, [onResult, onError])
@@ -73,13 +66,19 @@ export default function BarcodeScanner({ onResult, onError }: Props) {
     <div style={{ display: 'grid', gap: 8 }}>
       <video
         ref={videoRef}
-        style={{ width: '100%', borderRadius: 8 }}
-        autoPlay
-        muted
+        style={{
+          width: '100%',
+          borderRadius: 12,
+          background: '#000',
+          aspectRatio: '16 / 9',
+          objectFit: 'cover'
+        }}
+        // Necesario en iOS para que se vea inline
         playsInline
+        muted
+        autoPlay
       />
-      {msg && <small style={{ color: '#ffb703' }}>{msg}</small>}
-      {!running && <small>Apunta la cámara al código de barras.</small>}
+      <small>{msg}</small>
     </div>
   )
 }
